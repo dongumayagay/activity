@@ -1,0 +1,50 @@
+name: auto-commit
+
+on:
+  schedule:
+    - cron: "0 6 * * *"     # daily 06:00 UTC (1 run/day, not hourly)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-commit
+  cancel-in-progress: false
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: configure git
+        run: |
+          git config user.name "dongumayagay"
+          git config user.email "mcdongumayagay@gmail.com"
+
+      - name: commit (no sleep, backdated time spread)
+        run: |
+          set -e
+          # 1-4 commits this run, times spread across the day via commit dates
+          # (no sleep -> ~20s runner time, vs ~20min on the old hourly version)
+          n=$(( (RANDOM % 4) + 1 ))
+          echo "doing $n commit(s)"
+          for i in $(seq 1 "$n"); do
+            off=$(( RANDOM % 21600 ))   # 0-6h back, GNU date on ubuntu runner
+            d="$(date -u -d "-${off} seconds" +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Contribution: $d #$i" > .activity
+            git add .activity
+            GIT_AUTHOR_DATE="$d" GIT_COMMITTER_DATE="$d" \
+              git commit -q -m "Contribution: $d"
+          done
+          # retry push to survive concurrent runs
+          for attempt in 1 2 3; do
+            git push && exit 0
+            echo "push $attempt failed, rebasing"
+            git pull --rebase
+            sleep 5
+          done
+          exit 1
